@@ -1,0 +1,62 @@
+The exploit in action:
+
+root@KaliBox:~# ./exploit.pl | nc -p 4222 0.0.0.0 9999
+
+Welcome warrior.  What is your name?
+You wake up in a cave.  You have no recollection of how you got here.You have 3 options:
+1. Wait here for something to happen.
+2. Go deeper into the cave.
+3. Exit the cave.
+Please make a choice 1 - 3: 
+
+-- SNIP -- 
+
+Your instincts tell you something is amiss, and they've never lead you astray before.
+You plunge your sword into the man's chest.  His face contorts as his body crumples.
+In amazement, you watch as the man's form changes to that of a large and hideous grue!
+In your childhood you'd heard tale of the King of the Grue.  A vicious and fearsome beast,
+ capable of changing his appearance at will.
+You 
+cat key
+It's nice and dark in here. Just the way the grues like it...
+
+
+Challenge Description: So what is this challenge all about? nx200 is a 
+binary that takes input to select a series of choices in a game where 
+you must defeat the grue.
+
+Background Info Needed: In order to defeat this challenge you will need
+to have basic knowledge of shellcode (or where to find some), string
+exploits, programming in at least one language (this challenge is best
+done in perl or python), and last one of the following: knowledge of 
+assembly in order to understand the disassembled binary or be able to 
+decompile the source binary into a language you do understand (like C).
+
+Tools Used During this Challenge: flawfinder, objdump, gdb, hopper, 
+netcat, and Retargetable Decompiler.
+
+Beating the Challenge: When I first work on a challenge I always like
+to interact with the binary first so that I can see how it takes inputs.
+So the first thing I noticed is that it accepts general string-like input. 
+Second, I found that the program interacts with me through a series of 
+menus. This means that I either have to A) Win the game or B) Cheat and
+win the game. Before I can do either I will need to examine the binary
+that is available to me.
+
+Examining the Binary: The first tool I used was flawfinder. Flawfinder
+discovered two possible vulnerabilities - First, a possible format string
+exploit in snprintf and second, a possible read buffer overflow. Ok - so
+now I have two starting points. The next tool that I used was the 
+Retargetable Decompiler (an online 32-bit decompiler/disassembler), which
+allows me to examin the code in C. When examining the code in C you will 
+notice that all paths eventually lead to your imminent death by Grue. So 
+this means that we will need to cheat by taking advantage of one of our 
+two possible flaws we found earlier.
+
+Next, I checked the buffer overflow. Every read for menu choices had a 
+validation on the input which didn't allow me to overflow the buffer 
+without falling into a default else condition. However, I did eventually
+notice that the first initial read would take any input as long as it did
+not exceed 1024 bytes. This may be useful - but not for a buffer overflow.
+
+Then, I checked the snprintf possibility.
