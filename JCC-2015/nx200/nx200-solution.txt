@@ -134,7 +134,7 @@ now lets make this visual because it will help us later:
 ++++++++++++++
 ++  AAAA    ++   <== Our test input case
 ++++++++++++++
-++	arg1		++   !-- %x not so useful yet
+++  arg1    ++   !-- %x not so useful yet
 ++++++++++++++
 ++  arg2    ++   !-- %x not so useful yet
 ++++++++++++++
@@ -303,12 +303,12 @@ the shellcode.
 ++  4 bytes ++   <== More shellcode
 ++++++++++++++
 
-... etc ... until
+... etc ... until ...
 
 ++++++++++++++
 ++  8$hn    ++   <== end of format string
 ++++++++++++++
-++	args		++   !-- %x not so useful yet
+++   args   ++   !-- %x not so useful yet
 ++++++++++++++
 ++shellcode ++   <== The first argument in the stack we can influence,
 ++++++++++++++       which happens to be shellcode ... 
